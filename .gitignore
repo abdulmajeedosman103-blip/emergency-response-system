@@ -1,0 +1,7 @@
+# Emergency Response System
+.env
+node_modules/
+dist/
+build/
+*.log
+backend/uploads/*

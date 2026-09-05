@@ -1,0 +1,300 @@
+// backend/prisma/schema.prisma
+// Smart Real-Time Emergency Response and Coordination System
+// Database: PostgreSQL · Primary keys: UUID · Final version 1
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────── ENUMS ─────────────────────────
+
+enum UserRole {
+  CITIZEN
+  OPERATOR
+  RESPONDER
+  ADMIN
+}
+
+enum EmergencyType {
+  MEDICAL
+  FIRE
+  ROAD_ACCIDENT
+  CRIME
+  NATURAL_DISASTER
+  OTHER
+}
+
+enum EmergencyPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum EmergencyStatus {
+  REPORTED
+  VERIFIED
+  RESPONDER_ASSIGNED
+  RESPONDER_EN_ROUTE
+  RESPONDER_ARRIVED
+  RESOLVED
+  CANCELLED
+}
+
+enum ResponderAvailability {
+  AVAILABLE
+  BUSY
+  OFFLINE
+}
+
+enum AssignmentStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EN_ROUTE
+  ARRIVED
+  COMPLETED
+  CANCELLED
+}
+
+enum OrganizationType {
+  AMBULANCE_SERVICE
+  FIRE_SERVICE
+  POLICE_SERVICE
+  DISASTER_RESPONSE
+  HOSPITAL
+  OTHER
+}
+
+enum NotificationType {
+  INCIDENT_REPORTED
+  INCIDENT_VERIFIED
+  RESPONDER_ASSIGNED
+  RESPONDER_EN_ROUTE
+  RESPONDER_ARRIVED
+  INCIDENT_RESOLVED
+  INCIDENT_CANCELLED
+  SYSTEM
+}
+
+enum AuditAction {
+  USER_LOGGED_IN
+  USER_LOGGED_OUT
+  USER_CREATED
+  USER_UPDATED
+  USER_PASSWORD_CHANGED
+  USER_DEACTIVATED
+  USER_ACTIVATED
+  ORGANIZATION_CREATED
+  ORGANIZATION_UPDATED
+  ORGANIZATION_DEACTIVATED
+  ORGANIZATION_ACTIVATED
+  RESPONDER_CREATED
+  RESPONDER_UPDATED
+  RESPONDER_AVAILABILITY_CHANGED
+  INCIDENT_CREATED
+  INCIDENT_SOS_TRIGGERED
+  INCIDENT_STATUS_CHANGED
+  INCIDENT_PRIORITY_CHANGED
+  INCIDENT_CANCELLED
+  INCIDENT_AI_SUGGESTED
+  ASSIGNMENT_CREATED
+  ASSIGNMENT_AUTO_ASSIGNED
+  ASSIGNMENT_MANUAL_ASSIGNED
+  ASSIGNMENT_ACCEPTED
+  ASSIGNMENT_REJECTED
+  ASSIGNMENT_CANCELLED
+  ASSIGNMENT_STATUS_CHANGED
+  EVIDENCE_UPLOADED
+  EVIDENCE_DELETED
+  SYSTEM
+}
+
+// ───────────────────────── MODELS ─────────────────────────
+
+model User {
+  id                 String                 @id @default(uuid())
+  role               UserRole               @default(CITIZEN)
+  fullName           String                 @db.VarChar(120)
+  email              String                 @unique @db.VarChar(255)
+  phone              String?                @db.VarChar(30)
+  passwordHash       String                 @db.VarChar(255)
+  isActive           Boolean                @default(true)
+  lastLoginAt        DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  responder           Responder?
+  incidents           EmergencyIncident[]   @relation("IncidentReporter")
+  verifiedIncidents   EmergencyIncident[]   @relation("IncidentVerifier")
+  resolvedIncidents   EmergencyIncident[]   @relation("IncidentResolver")
+  cancelledIncidents  EmergencyIncident[]   @relation("IncidentCanceller")
+  assignmentsAssigned EmergencyAssignment[] @relation("AssignmentAssigner")
+  evidenceUploads     EmergencyEvidence[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+
+  @@index([role])
+  @@map("users")
+}
+
+model Organization {
+  id           String           @id @default(uuid())
+  name         String           @unique @db.VarChar(160)
+  type         OrganizationType
+  contactEmail String?          @db.VarChar(255)
+  contactPhone String?          @db.VarChar(30)
+  address      String?          @db.VarChar(255)
+  isActive     Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  responders   Responder[]
+
+  @@map("organizations")
+}
+
+model Responder {
+  id               String                @id @default(uuid())
+  userId           String                @unique
+  user             User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organizationId   String
+  organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  specialization   EmergencyType
+  availability     ResponderAvailability @default(OFFLINE)
+  currentLatitude  Float?
+  currentLongitude Float?
+  lastLocationAt   DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  assignments      EmergencyAssignment[]
+
+  @@index([organizationId])
+  @@index([availability, specialization])
+  @@index([specialization])
+  @@map("responders")
+}
+
+model EmergencyIncident {
+  id                   String            @id @default(uuid())
+  reporterId           String
+  reporter             User              @relation("IncidentReporter", fields: [reporterId], references: [id], onDelete: Restrict)
+  type                 EmergencyType
+  description          String            @db.Text
+  locationLatitude     Float
+  locationLongitude    Float
+  locationAddress      String?           @db.VarChar(255)
+  peopleAffected       Int               @default(1)
+  priority             EmergencyPriority @default(MEDIUM)
+  status               EmergencyStatus   @default(REPORTED)
+
+  citizenContactConsent Boolean          @default(false)
+  sourceSos            Boolean           @default(false)
+
+  verifiedById         String?
+  verifiedBy           User?             @relation("IncidentVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  verifiedAt           DateTime?
+  assignedAt           DateTime?
+  enRouteAt            DateTime?
+  arrivedAt            DateTime?
+  resolvedById         String?
+  resolvedBy           User?             @relation("IncidentResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt           DateTime?
+  cancelledById        String?
+  cancelledBy          User?             @relation("IncidentCanceller", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelledAt          DateTime?
+  cancelReason         String?           @db.VarChar(255)
+
+  aiCategorySuggestion EmergencyType?
+  aiPrioritySuggestion EmergencyPriority?
+  aiConfidence         Float?
+  aiOverridden         Boolean           @default(false)
+  aiProcessedAt        DateTime?
+
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  assignments          EmergencyAssignment[]
+  evidence             EmergencyEvidence[]
+
+  @@index([status, createdAt])
+  @@index([type])
+  @@index([priority])
+  @@index([reporterId])
+  @@index([createdAt])
+  @@map("emergency_incidents")
+}
+
+model EmergencyAssignment {
+  id                    String            @id @default(uuid())
+  incidentId            String
+  incident              EmergencyIncident @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  responderId           String
+  responder             Responder         @relation(fields: [responderId], references: [id], onDelete: Restrict)
+  assignedById          String
+  assignedBy            User              @relation("AssignmentAssigner", fields: [assignedById], references: [id], onDelete: Restrict)
+  status                AssignmentStatus  @default(PENDING)
+  distanceKmAtAssignment Float?
+  assignedAt            DateTime          @default(now())
+  respondedAt           DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([responderId, status])
+  @@index([incidentId, status])
+  @@map("emergency_assignments")
+}
+
+model EmergencyEvidence {
+  id           String             @id @default(uuid())
+  incidentId   String
+  incident     EmergencyIncident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  uploadedById String
+  uploadedBy   User               @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  fileName     String             @db.VarChar(255)
+  filePath     String             @db.VarChar(500)
+  mimeType     String             @db.VarChar(100)
+  sizeBytes    Int
+  createdAt    DateTime           @default(now())
+
+  @@index([incidentId])
+  @@map("emergency_evidence")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String           @db.VarChar(160)
+  message   String           @db.VarChar(500)
+  data      Json?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  actorId    String?
+  actor      User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     AuditAction
+  entityType String      @db.VarChar(60)
+  entityId   String?     @db.VarChar(60)
+  details    Json?
+  ipAddress  String?     @db.VarChar(45)
+  createdAt  DateTime    @default(now())
+
+  @@index([actorId])
+  @@index([entityType])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
